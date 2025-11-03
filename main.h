@@ -47,9 +47,19 @@ bool readBootSector(ifstream& img, BootSector& boot);
 void printBootInfo(const BootSector& boot);
 void listRootDirectory(ifstream& disk, const BootSector& boot);
 bool readFat16Name(char name[11]);
-unsigned int findFile(ifstream& disk, const BootSector& boot);
+unsigned int findFile(ifstream& disk, const BootSector& boot, const char* name);
 void printFileAttributes(const DirectoryEntry& entry);
 void listAttributes(ifstream& disk, const BootSector& boot);
 void evokeMenu();
+void listFileContent(ifstream& disk, const BootSector& boot);
+void renameFile(const string& imagePath, const BootSector& boot);
+
+//função pra calcular 
+uint64_t calcRootDirOffset(const BootSector& boot);
+uint64_t calcFirstDataSector(const BootSector& boot);
+uint64_t calcClusterOffset(const BootSector& boot, uint16_t cluster);
+uint64_t calcFATOffset(const BootSector& boot);
+uint16_t readFATEntry(ifstream& disk, const BootSector& boot, uint16_t cluster);
+
 
 #endif //SO2025_FAT16FILESYSTEM_MAIN_H
