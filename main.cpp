@@ -30,11 +30,13 @@ int main (){
     while (option != 0) {
         evokeMenu();
         cin >> option;
-        if(cin.fail()) {
-            cin.clear(); 
-            cin.ignore(numeric_limits<streamsize>::max(), '\n'); 
-            option = -1;  
-        continue;
+        if (cin.fail()) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            option = -1;
+            continue;
+        } else {
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');    
         }
         switch (option) {
             case 1:
@@ -201,8 +203,9 @@ void listFileContent(ifstream& disk, const BootSector& boot) {
 
 bool readFat16Name(char name[11]) {
     string input;
+    //cin.ignore(numeric_limits<streamsize>::max(), '\n'); 
     cout << "Digite o nome do arquivo (ex: ARQUIVO.TXT): ";
-    cin.ignore();
+    
     getline(cin, input);
 
     input.erase(0, input.find_first_not_of(" \t"));
@@ -325,7 +328,7 @@ void renameFile(const string& imagePath, const BootSector& boot) {
     }
 
     char newName[11];
-    cout << "Novo nome (8.3):\n";
+    cout << "Novo nome (8.3): \n";
     if (!readFat16Name(newName)) { disk.close(); img.close(); return; }
 
     unsigned int exists = findFile(disk, boot, newName);
@@ -338,7 +341,7 @@ void renameFile(const string& imagePath, const BootSector& boot) {
     uint64_t entryOffset = rootOffset + uint64_t(filePos - 1) * sizeof(DirectoryEntry);
 
     img.seekp(entryOffset, ios::beg);
-    img.write(reinterpret_cast<char*>(newName), 11);
+    img.write(newName, 11);
     img.flush();
 
     cout << "Renomeado com sucesso.\n";
