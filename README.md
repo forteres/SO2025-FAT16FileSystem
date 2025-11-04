@@ -33,5 +33,5 @@ Cada uma das operações será avaliada de acordo com a sua corretude: As opera�
 * Listar o conteúdo de um arquivo 	10% (X)
 * Exibir os atributos de um arquivo	10% (X)
 * Renomear um arquivo		10%         (X)
-* Apagar/remover um arquivo		20%     (Y)
+* Apagar/remover um arquivo		20%     (X)
 * Inserir/criar um novo arquivo	40%     ()	 

@@ -54,8 +54,7 @@ void listFileContent(fstream& disk, const BootSector& boot, vector<DirectoryEntr
 void listAttributes(vector<DirectoryEntry> entries);
 void printFileAttributes(const DirectoryEntry& entry);
 void renameFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
-
-void deleteFile(const string& imagePath, const BootSector& boot);
+void deleteFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
 
 void evokeMenu();
 

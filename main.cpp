@@ -60,7 +60,7 @@ int main (){
                 renameFile(fat16DISK,bootSector,rootDirectoryEntries);
                 break;
             case 5:
-                //deleteFile(path, bootSector);
+                deleteFile(fat16DISK, bootSector, rootDirectoryEntries);
                 break;
             case 6:
                 break;
@@ -95,17 +95,14 @@ void printBootInfo(const BootSector& boot) {
     cout << "Setores reservados: " << boot.reservedSectors << endl;
     cout << "Num. FATs: " << (int)boot.numFATs << endl;
     cout << "Entradas raiz: " << boot.rootEntries << endl;
-    // cout << "Small Number of Sectors: " << boot.totalSectors16 << endl;
-    // cout << "Media Descriptor: " << (int)boot.mediaDescriptor << endl;
-    // cout << "Large Number of Sectors: " << boot.totalSectors32 << endl;
     cout << "Tamanho da FAT (setores): " << boot.FATSize << endl;
 }
 
 bool readRootDirectory(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries) {
     streamoff rootDirectoryOffset = calcRootDirOffset(boot);
-    int rootDirectorySize = boot.rootEntries * sizeof(DirectoryEntry); // transformar global?
+    int rootDirectorySize = boot.rootEntries * sizeof(DirectoryEntry);
 
-    disk.seekg(rootDirectoryOffset, ios::beg); // Move o ponteiro até o inicio do diretorio root
+    disk.seekg(rootDirectoryOffset, ios::beg);
 
     entries.resize(boot.rootEntries); // Define vector de entries com |x| = limite de entries dado no disco
     disk.read(reinterpret_cast<char*>(entries.data()), rootDirectorySize); // Popula cada entry preenchendo o struct
@@ -201,7 +198,7 @@ void listFileContent(fstream& disk, const BootSector& boot, vector<DirectoryEntr
     }
 
     uint32_t remaining = entry.fileSize;
-    uint16_t cluster   = entry.firstCluster; // ensure your struct uses this field name
+    uint16_t cluster   = entry.firstCluster;
     const uint32_t clusterBytes = static_cast<uint32_t>(boot.sectorsPerCluster) * boot.bytesPerSector;
 
     string out;
@@ -305,6 +302,7 @@ void renameFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& e
         return;
     }
 
+    cout << "Novo nome - ";
     char newName[11];
     if (!readFat16Name(newName)) return;
 
@@ -326,10 +324,43 @@ void renameFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& e
     cout << "Renomeado com sucesso" << endl;
 }
 
-// above is done
+void deleteFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries) {
+    char name[11];
+    if (!readFat16Name(name)) return;
 
-void deleteFile(fstream& disk, const BootSector& boot) {
- return;
+    uint16_t filePos = findFile(entries, name);
+    if (filePos == 0 || filePos > entries.size()) {
+        cout << "Arquivo nao encontrado" << endl;
+        return;
+    }
+
+    DirectoryEntry& entry = entries[filePos - 1];
+    if (entry.firstCluster < 2) {
+        cout << "Arquivo sem clusters alocados" << endl;
+    } else {
+        uint16_t cluster = entry.firstCluster;
+        while (cluster >= 0x0002 && cluster < 0xFFF8) {
+            uint16_t next = readFATEntry(disk, boot, cluster);
+
+            streamoff fatOffset = calcFATOffset(boot);
+            disk.seekp(fatOffset, ios::beg);
+            uint16_t zero = 0x0000;
+            disk.write(reinterpret_cast<char*>(&zero), sizeof(zero));
+
+            if (next == 0xFFFF || next >= 0xFFF8) break;
+            cluster = next;
+        }
+    }
+    entry.name[0] = (char)0xE5;
+
+    streamoff rootOffset = calcRootDirOffset(boot);
+    streamoff entryOffset = rootOffset + (filePos - 1) * sizeof(DirectoryEntry);
+
+    disk.seekp(entryOffset, ios::beg);
+    disk.write(reinterpret_cast<char*>(&entry), sizeof(DirectoryEntry));
+    disk.flush();
+
+    cout << "Arquivo deletado com sucesso" << endl;
 }
 
 void evokeMenu() {
