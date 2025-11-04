@@ -2,6 +2,7 @@
 #define SO2025_FAT16FILESYSTEM_MAIN_H
 #include <cstdint>
 #include <iosfwd>
+#include <vector>
 
 using namespace std;
 
@@ -43,25 +44,19 @@ struct DirectoryEntry {
 };
 #pragma pack(pop)
 
-bool readBootSector(ifstream& img, BootSector& boot);
+bool readBootSector(fstream& disk, BootSector& boot);
 void printBootInfo(const BootSector& boot);
-void listRootDirectory(ifstream& disk, const BootSector& boot);
+bool readRootDirectory(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& rootDirectoryEntries);
+void printRootDirectory(const vector<DirectoryEntry>& entries);
 bool readFat16Name(char name[11]);
-unsigned int findFile(ifstream& disk, const BootSector& boot, const char* name);
+uint16_t findFile(const vector<DirectoryEntry>& entries, const char* name);
+void listFileContent(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
+void listAttributes(vector<DirectoryEntry> entries);
 void printFileAttributes(const DirectoryEntry& entry);
-void listAttributes(ifstream& disk, const BootSector& boot);
+void renameFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
+
+void deleteFile(const string& imagePath, const BootSector& boot);
+
 void evokeMenu();
-void listFileContent(ifstream& disk, const BootSector& boot);
-void renameFile(const string& imagePath, const BootSector& boot);
-void deleteFile(const std::string& imagePath, const BootSector& boot);
-
-
-//função pra calcular 
-uint64_t calcRootDirOffset(const BootSector& boot);
-uint64_t calcFirstDataSector(const BootSector& boot);
-uint64_t calcClusterOffset(const BootSector& boot, uint16_t cluster);
-uint64_t calcFATOffset(const BootSector& boot);
-uint16_t readFATEntry(ifstream& disk, const BootSector& boot, uint16_t cluster);
-
 
 #endif //SO2025_FAT16FILESYSTEM_MAIN_H

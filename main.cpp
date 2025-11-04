@@ -1,4 +1,5 @@
 #include "main.h"
+#include "calc.h"
 
 #include <algorithm>
 #include <cstring>
@@ -7,12 +8,8 @@
 #include <vector>
 #include <tuple>
 #include <limits>
-#include <filesystem>
-#include <filesystem>
 #include <chrono>
 #include <ctime>
-
-namespace fs = std::filesystem;
 
 using namespace std;
 
@@ -20,7 +17,7 @@ int main (){
 
     const string path = "..\\disks\\disco2.img";
 
-    ifstream fat16DISK(path,ios::binary);
+    fstream fat16DISK(path, ios::in | ios::out | ios::binary);
     if (!fat16DISK.is_open()) {
         cout << "Erro ao Abrir o arquivo";
         return 1;
@@ -28,7 +25,12 @@ int main (){
 
     BootSector bootSector;
     if (!readBootSector(fat16DISK, bootSector)) {
-        cout << "Falha ao ler Boot Sector.\n";
+        cout << "Falha ao ler Boot Sector" << endl;
+        return 1;
+    }
+    vector<DirectoryEntry> rootDirectoryEntries;
+    if (!readRootDirectory(fat16DISK, bootSector, rootDirectoryEntries)) {
+        cout << "Falha ao ler Root Directory" << endl;
         return 1;
     }
 
@@ -46,19 +48,19 @@ int main (){
         }
         switch (option) {
             case 1:
-                listRootDirectory(fat16DISK,bootSector);
+                printRootDirectory(rootDirectoryEntries);
                 break;
             case 2:
-                listFileContent(fat16DISK, bootSector);
+                    listFileContent(fat16DISK, bootSector, rootDirectoryEntries);
                 break;
             case 3:
-                listAttributes(fat16DISK,bootSector);
+                listAttributes(rootDirectoryEntries);
                 break;
             case 4:
-                renameFile(path, bootSector);
+                renameFile(fat16DISK,bootSector,rootDirectoryEntries);
                 break;
             case 5:
-                deleteFile(path, bootSector);
+                //deleteFile(path, bootSector);
                 break;
             case 6:
                 break;
@@ -78,7 +80,7 @@ int main (){
 }
 
 // functions
-bool readBootSector(ifstream& disk, BootSector& boot) {
+bool readBootSector(fstream& disk, BootSector& boot) {
     if (!disk.is_open()) return false;
     disk.seekg(0, ios::beg);
     disk.read(reinterpret_cast<char*>(&boot), sizeof(BootSector));
@@ -99,7 +101,20 @@ void printBootInfo(const BootSector& boot) {
     cout << "Tamanho da FAT (setores): " << boot.FATSize << endl;
 }
 
-void listRootDirectory(ifstream& disk, const BootSector& boot) {
+bool readRootDirectory(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries) {
+    streamoff rootDirectoryOffset = calcRootDirOffset(boot);
+    int rootDirectorySize = boot.rootEntries * sizeof(DirectoryEntry); // transformar global?
+
+    disk.seekg(rootDirectoryOffset, ios::beg); // Move o ponteiro até o inicio do diretorio root
+
+    entries.resize(boot.rootEntries); // Define vector de entries com |x| = limite de entries dado no disco
+    disk.read(reinterpret_cast<char*>(entries.data()), rootDirectorySize); // Popula cada entry preenchendo o struct
+
+    return disk.good();
+}
+
+void printRootDirectory(const vector<DirectoryEntry>& entries)
+{
     auto trim = [](string s) {
         size_t end = s.find_last_not_of(' ');
         if (end != string::npos)
@@ -109,110 +124,29 @@ void listRootDirectory(ifstream& disk, const BootSector& boot) {
         return s;
     };
 
-    streamoff rootDirectoryOffset = (boot.reservedSectors + boot.numFATs * boot.FATSize) * boot.bytesPerSector;
-    int rootDirectorySize = boot.rootEntries * sizeof(DirectoryEntry);
-
-    disk.seekg(rootDirectoryOffset, ios::beg); // Move o ponteiro até o inicio do diretorio root
-
-    vector<DirectoryEntry> entries(boot.rootEntries); // Define vector de entries com |x| = limite de entries dado no disco
-    disk.read(reinterpret_cast<char*>(entries.data()), rootDirectorySize); // Popula cada entry preenchendo o struct
-
     cout << endl << "=== Arquivos no diretorio raiz ===" << endl;
-    for (const auto& entry : entries) {
-        if (entry.name[0] == 0x00) break;        // fim da lista
-        if ((uint8_t)entry.name[0] == 0xE5) continue; // deletado
 
-        if (!(entry.attr & 0x08) && !(entry.attr & 0x10)) { // ignora volume label e subdiretorio
+    for (const auto& entry : entries) {
+        if (entry.name[0] == 0x00) break;        // end of list
+        if ((uint8_t)entry.name[0] == 0xE5) continue; // deleted
+
+        // skip volume label & subdirectories
+        if (!(entry.attr & 0x08) && !(entry.attr & 0x10)) {
             string name = trim(string(entry.name, entry.name + 8));
             string extension = trim(string(entry.name + 8, entry.name + 11));
 
             cout << name;
             if (!extension.empty()) cout << "." << extension;
-            cout << " (" << entry.fileSize << " bytes)\n";
+            cout << " (" << entry.fileSize << " bytes)" << endl;
         }
     }
 }
-
-uint64_t calcRootDirOffset(const BootSector& boot) {
-    return uint64_t(boot.reservedSectors + boot.numFATs * boot.FATSize) * boot.bytesPerSector;
-}
-
-uint64_t calcFirstDataSector(const BootSector& boot) {
-    return calcRootDirOffset(boot) + boot.rootEntries * sizeof(DirectoryEntry);
-}
-
-uint64_t calcClusterOffset(const BootSector& boot, uint16_t cluster) {
-    return calcFirstDataSector(boot) + (cluster - 2) * boot.sectorsPerCluster * boot.bytesPerSector;
-}
-
-uint64_t calcFATOffset(const BootSector& boot) {
-    return boot.reservedSectors * boot.bytesPerSector;
-}
-
-uint16_t readFATEntry(ifstream& disk, const BootSector& boot, uint16_t cluster) {
-    uint64_t fatOffset = calcFATOffset(boot) + cluster * 2; // FAT16 usa 2 bytes por entrada
-    disk.seekg(fatOffset, ios::beg);
-    uint16_t nextCluster;
-    disk.read(reinterpret_cast<char*>(&nextCluster), sizeof(nextCluster));
-    return nextCluster;
-}
-
-void listFileContent(ifstream& disk, const BootSector& boot) {
-    char name[11];
-    if (!readFat16Name(name)) return;
-
-    unsigned int filePos = findFile(disk, boot, name);
-    if (filePos == 0) {
-        cout << "Arquivo nao encontrado\n";
-        return;
-    }
-
-    uint64_t rootOffset = calcRootDirOffset(boot);
-    disk.seekg(rootOffset + uint64_t(filePos - 1) * sizeof(DirectoryEntry), ios::beg);
-    DirectoryEntry entry;
-    disk.read(reinterpret_cast<char*>(&entry), sizeof(DirectoryEntry));
-
-    if (entry.fileSize == 0) {
-        cout << "[Arquivo vazio]\n";
-        return;
-    }
-
-    uint32_t remaining = entry.fileSize;
-    uint16_t cluster = entry.firstCluster;
-    string out;
-    uint32_t clusterBytes = uint32_t(boot.sectorsPerCluster) * boot.bytesPerSector;
-
-    while (remaining > 0 && cluster >= 0x0002 && cluster < 0xFFF8) {
-        uint64_t coff = calcClusterOffset(boot, cluster);
-        disk.seekg(coff, ios::beg);
-        uint32_t toRead = (remaining < clusterBytes) ? remaining : clusterBytes;
-        vector<char> buf(toRead);
-        disk.read(buf.data(), toRead);
-        out.append(buf.begin(), buf.end());
-        remaining -= toRead;
-        if (remaining == 0) break;
-        cluster = readFATEntry(disk, boot, cluster);
-    }
-
-    int printable = 0;
-    for (unsigned char c : out) if (c >= 0x20 || c == '\n' || c == '\r' || c == '\t') printable++;
-    if (out.size() > 0 && double(printable) / out.size() > 0.7) {
-        cout << out << "\n";
-    } else {
-        for (size_t i = 0; i < out.size(); ++i) {
-            printf("%02X", (unsigned char)out[i]);
-            if ((i+1)%16==0) printf("\n"); else if ((i+1)%2==0) printf(" ");
-        }
-        printf("\n");
-    }
-}
-
 
 bool readFat16Name(char name[11]) {
     string input;
-    //cin.ignore(numeric_limits<streamsize>::max(), '\n'); 
+    //cin.ignore(numeric_limits<streamsize>::max(), '\n');
     cout << "Digite o nome do arquivo (ex: ARQUIVO.TXT): ";
-    
+
     getline(cin, input);
 
     input.erase(0, input.find_first_not_of(" \t"));
@@ -236,26 +170,96 @@ bool readFat16Name(char name[11]) {
     return true;
 }
 
-unsigned int findFile(ifstream& disk, const BootSector& boot, const char* name) {
-    streamoff rootDirectoryOffset = (boot.reservedSectors + boot.numFATs * boot.FATSize) * boot.bytesPerSector;
-    int rootDirectorySize = boot.rootEntries * sizeof(DirectoryEntry);
+uint16_t findFile(const vector<DirectoryEntry>& entries, const char* name) {
+    uint16_t entryNumber = 0;
 
-    disk.seekg(rootDirectoryOffset, ios::beg);
-
-    vector<DirectoryEntry> entries(boot.rootEntries);
-    disk.read(reinterpret_cast<char*>(entries.data()), rootDirectorySize);
-
-    unsigned int entryNumber = 0;
     for (const auto& entry : entries) {
         entryNumber++;
-        if (entry.name[0] == 0x00) {
-            entryNumber = 0;
+        if (entry.name[0] == 0x00) return 0;
+        if ((uint8_t)entry.name[0] == 0xE5) continue;
+        if ((entry.attr & 0x0F) == 0x0F || (entry.attr & 0x08) || (entry.attr & 0x10)) continue;
+        if (memcmp(entry.name, name, 11) == 0) return entryNumber;
+    }
+
+    return 0; // not found
+}
+
+void listFileContent(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries) {
+    char name11[11];
+    if (!readFat16Name(name11)) return;
+
+    uint16_t filePos = findFile(entries, name11);
+    if (filePos == 0 || filePos > entries.size()) {
+        cout << "Arquivo nao encontrado\n";
+        return;
+    }
+
+    DirectoryEntry& entry = entries[filePos - 1];
+    if (entry.fileSize == 0) {
+        cout << "[Arquivo vazio]\n";
+        return;
+    }
+
+    uint32_t remaining = entry.fileSize;
+    uint16_t cluster   = entry.firstCluster; // ensure your struct uses this field name
+    const uint32_t clusterBytes = static_cast<uint32_t>(boot.sectorsPerCluster) * boot.bytesPerSector;
+
+    string out;
+    out.reserve(remaining);
+
+    while (remaining > 0 && cluster >= 0x0002 && cluster < 0xFFF8) {
+        if (cluster == 0xFFF7 || cluster == 0x0000) { // bad or free => corrupt chain
+            cout << "[Corrupcao na cadeia de clusters]" << endl;
             break;
         }
-        if ((uint8_t)entry.name[0] == 0xE5 || (entry.attr & 0x08) || (entry.attr & 0x10)) continue;
-        if (memcmp(entry.name,name,11) == 0) break;
+
+        streamoff coff = calcClusterOffset(boot, cluster);
+        disk.seekg(coff, ios::beg);
+        if (!disk.good()) { cout << "[Falha no seek]" << endl; break; }
+
+        size_t toRead = min<uint32_t>(remaining, clusterBytes);
+        vector<char> buf(toRead);
+        disk.read(buf.data(), static_cast<streamsize>(toRead));
+        if (!disk.good()) { cout << "[Falha na leitura]" << endl; break; }
+
+        out.append(buf.begin(), buf.end());
+        remaining -= static_cast<uint32_t>(toRead);
+
+        if (remaining == 0) break;
+        cluster = readFATEntry(disk, boot, cluster);
     }
-    return entryNumber;
+
+    // print
+
+    int printable = 0;
+    for (unsigned char c : out)
+        if (c >= 0x20 || c == '\n' || c == '\r' || c == '\t') ++printable;
+
+    if (!out.empty() && double(printable) / out.size() > 0.7) {
+        cout << out << "\n";
+    } else {
+        for (size_t i = 0; i < out.size(); ++i) {
+            printf("%02X", static_cast<unsigned char>(out[i]));
+            if ((i + 1) % 16 == 0) printf("\n");
+            else if ((i + 1) % 2 == 0) printf(" ");
+        }
+        if (!out.empty() && out.size() % 16 != 0) printf("\n");
+    }
+}
+
+void listAttributes(vector<DirectoryEntry> entries) {
+    char name[11];
+    if (!readFat16Name(name)) {
+        return;
+    }
+
+    uint16_t filePos = findFile(entries, name);
+    if (filePos == 0) {
+        cout << "Arquivo nao encontrado" << endl;
+        return;
+    }
+    DirectoryEntry& entry = entries[filePos - 1];
+    printFileAttributes(entry);
 }
 
 void printFileAttributes(const DirectoryEntry& entry) {
@@ -291,182 +295,41 @@ void printFileAttributes(const DirectoryEntry& entry) {
     cout << endl;
 }
 
-void listAttributes(ifstream& disk, const BootSector& boot) {
-    char name[11];
-    if (!readFat16Name(name)) {
-        return;
-    }
+void renameFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries) {
+    char oldName[11];
+    if (!readFat16Name(oldName)) return;
 
-    unsigned int filePosition = findFile(disk, boot, name);
-    if (filePosition == 0) {
+    uint16_t filePos = findFile(entries, oldName);
+    if (filePos == 0 || filePos > entries.size()) {
         cout << "Arquivo nao encontrado" << endl;
         return;
     }
-    streamoff rootDirectoryOffset = (boot.reservedSectors + boot.numFATs * boot.FATSize) * boot.bytesPerSector;
-    disk.seekg(rootDirectoryOffset + (filePosition -1) * sizeof(DirectoryEntry), ios::beg);
-
-    DirectoryEntry entry;
-    disk.read(reinterpret_cast<char*>(&entry), sizeof(DirectoryEntry));
-    printFileAttributes(entry);
-
-    cout << "[DEBUG] createTime raw: 0x" << std::hex << entry.createTime 
-    << " createDate raw: 0x" << entry.createDate << std::dec << "\n";
-    cout << "[DEBUG] lastWriteTime raw: 0x" << std::hex << entry.lastWriteTime
-    << " lastWriteDate raw: 0x" << entry.lastWriteDate << std::dec << "\n";
-
-
-}
-
-void renameFile(const string& imagePath, const BootSector& boot) {
-    // abrir em read/write
-    fstream img(imagePath, ios::in | ios::out | ios::binary);
-    if (!img.is_open()) {
-        cout << "Erro ao abrir imagem para renomear\n";
-        return;
-    }
-    ifstream disk(imagePath, ios::binary);
-    if (!disk.is_open()) {
-        cout << "Erro ao abrir imagem para leitura\n";
-        img.close();
-        return;
-    }
-
-    char oldName[11];
-    cout << "Nome atual do arquivo:\n";
-    if (!readFat16Name(oldName)) { disk.close(); img.close(); return; }
-
-    unsigned int filePos = findFile(disk, boot, oldName);
-    if (filePos == 0) {
-        cout << "Arquivo nao encontrado\n";
-        disk.close(); img.close(); return;
-    }
 
     char newName[11];
-    cout << "Novo nome (8.3): \n";
-    if (!readFat16Name(newName)) { disk.close(); img.close(); return; }
+    if (!readFat16Name(newName)) return;
 
-    unsigned int exists = findFile(disk, boot, newName);
-    if (exists != 0) {
-        cout << "Erro: ja existe arquivo com esse nome\n";
-        disk.close(); img.close(); return;
+    if (findFile(entries, newName) != 0) {
+        cout << "Um Arquivo com este nome ja existe" << endl;
+        return;
     }
 
-    uint64_t rootOffset = calcRootDirOffset(boot);
-    uint64_t entryOffset = rootOffset + uint64_t(filePos - 1) * sizeof(DirectoryEntry);
+    DirectoryEntry& entry = entries[filePos - 1];
+    strncpy(entry.name, newName, sizeof(entry.name));
 
-    img.seekp(entryOffset, ios::beg);
-    img.write(newName, 11);
-    img.flush();
+    streamoff rootOffset = calcRootDirOffset(boot);
+    streamoff entryOffset = rootOffset + (filePos - 1) * sizeof(DirectoryEntry);
 
-    cout << "Renomeado com sucesso.\n";
-    disk.close();
-    img.close();
+    disk.seekp(entryOffset, ios::beg);
+    disk.write(newName, 11);
+    disk.flush();
+
+    cout << "Renomeado com sucesso" << endl;
 }
 
+// above is done
 
-void deleteFile(const string& imagePath, const BootSector& boot) {
-    try {
-        fs::path p(imagePath);
-        if (!fs::exists(p)) {
-            cout << "Arquivo de imagem nao existe: " << imagePath << "\n";
-            return;
-        }
-
-        auto t = std::chrono::system_clock::now();
-        std::time_t tt = std::chrono::system_clock::to_time_t(t);
-        std::tm tm_struct;
-        std::tm* tm_ptr = std::localtime(&tt);
-        if (tm_ptr) tm_struct = *tm_ptr;
-        else std::memset(&tm_struct, 0, sizeof(tm_struct));
-
-        char buf[32];
-        std::strftime(buf, sizeof(buf), "%Y%m%d_%H%M%S", &tm_struct);
-        fs::path backup = p.parent_path() / (p.stem().string() + std::string("_") + buf + p.extension().string());
-        fs::copy_file(p, backup, fs::copy_options::skip_existing);
-        cout << "Backup criado: " << backup.string() << "\n";
-    } catch (const std::filesystem::filesystem_error& e) {
-        cerr << "Erro ao criar backup: " << e.what() << "\n";
-    }
-
-    fstream img(imagePath, ios::in | ios::out | ios::binary);
-    if (!img.is_open()) {
-        cout << "Erro ao abrir imagem para exclusao\n";
-        return;
-    }
-
-    char name[11];
-    cout << "Nome do arquivo a apagar:\n";
-    if (!readFat16Name(name)) { img.close(); return; }
-
-    uint64_t rootOffset = calcRootDirOffset(boot);
-    size_t dirSize = size_t(boot.rootEntries) * sizeof(DirectoryEntry);
-    vector<DirectoryEntry> entries(boot.rootEntries);
-
-    img.seekg(rootOffset, ios::beg);
-    img.read(reinterpret_cast<char*>(entries.data()), dirSize);
-    if (!img) {
-        cerr << "Erro ao ler diretorio raiz\n";
-        img.close();
-        return;
-    }
-
-    int foundIndex = -1;
-    for (size_t i = 0; i < entries.size(); ++i) {
-        const DirectoryEntry& e = entries[i];
-        if (e.name[0] == 0x00) break;
-        if ((uint8_t)e.name[0] == 0xE5) continue;
-        if ((e.attr & 0x08) || (e.attr & 0x10)) continue;
-        if (memcmp(e.name, name, 11) == 0) { foundIndex = (int)i; break; }
-    }
-
-    if (foundIndex < 0) {
-        cout << "Arquivo nao encontrado\n";
-        img.close();
-        return;
-    }
-
-    DirectoryEntry entry = entries[foundIndex];
-    uint16_t cluster = entry.firstCluster;
-
-    if (cluster >= 0x0002 && cluster < 0xFFF8) {
-        while (true) {
-            uint64_t firstFATBase = uint64_t(boot.reservedSectors) * boot.bytesPerSector;
-            uint64_t fatEntryOffset = firstFATBase + uint64_t(cluster) * 2;
-
-            uint16_t nextCluster = 0;
-            img.seekg(fatEntryOffset, ios::beg);
-            img.read(reinterpret_cast<char*>(&nextCluster), sizeof(nextCluster));
-            if (!img) {
-                cerr << "Erro ao ler FAT (offset " << fatEntryOffset << ")\n";
-                break;
-            }
-
-            for (uint8_t fatIdx = 0; fatIdx < boot.numFATs; ++fatIdx) {
-                uint64_t fatBase = uint64_t(boot.reservedSectors) * boot.bytesPerSector
-                                 + uint64_t(fatIdx) * boot.FATSize * boot.bytesPerSector;
-                uint64_t thisEntry = fatBase + uint64_t(cluster) * 2;
-                uint16_t zero = 0x0000;
-                img.seekp(thisEntry, ios::beg);
-                img.write(reinterpret_cast<char*>(&zero), sizeof(zero));
-                if (!img) {
-                    cerr << "Erro ao escrever na FAT copia " << int(fatIdx) << " (offset " << thisEntry << ")\n";
-                }
-            }
-            img.flush();
-
-            if (nextCluster >= 0xFFF8 || nextCluster == 0x0000 || nextCluster == 0xFFFF) break;
-            cluster = nextCluster;
-        }
-    }
-
-    uint64_t entryOffset = rootOffset + uint64_t(foundIndex) * sizeof(DirectoryEntry);
-    unsigned char del = 0xE5;
-    img.seekp(entryOffset, ios::beg);
-    img.write(reinterpret_cast<char*>(&del), 1);
-    img.flush();
-
-    cout << "Arquivo removido (marcado como deletado) e clusters liberados.\n";
-    img.close();
+void deleteFile(fstream& disk, const BootSector& boot) {
+ return;
 }
 
 void evokeMenu() {
