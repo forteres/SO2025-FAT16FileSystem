@@ -50,11 +50,17 @@ bool readRootDirectory(fstream& disk, const BootSector& boot, vector<DirectoryEn
 void printRootDirectory(const vector<DirectoryEntry>& entries);
 bool readFat16Name(char name[11]);
 uint16_t findFile(const vector<DirectoryEntry>& entries, const char* name);
+uint16_t readFATEntry(fstream& disk, const BootSector& boot, uint16_t cluster);
 void listFileContent(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
 void listAttributes(vector<DirectoryEntry> entries);
 void printFileAttributes(const DirectoryEntry& entry);
 void renameFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
 void deleteFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
+
+uint16_t findFreeEntry(const vector<DirectoryEntry>& entries);
+uint16_t findFreeCluster(fstream& disk, const BootSector& boot);
+void writeFATEntry(fstream& disk, const BootSector& boot, uint16_t cluster, uint16_t value);
+void insertFile(fstream& disk, const BootSector& boot, vector<DirectoryEntry>& entries);
 
 void evokeMenu();
 

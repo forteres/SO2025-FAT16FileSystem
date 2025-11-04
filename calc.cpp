@@ -20,10 +20,14 @@ streamoff calcFATOffset(const BootSector& boot) {
     return streamoff(boot.reservedSectors * boot.bytesPerSector);
 }
 
-uint16_t readFATEntry(fstream& disk, const BootSector& boot, uint16_t cluster) { // evaluate
-    streamoff fatOffset = calcFATOffset(boot) + cluster * 2;
-    disk.seekg(fatOffset, ios::beg);
-    uint16_t nextCluster;
-    disk.read(reinterpret_cast<char*>(&nextCluster), sizeof(nextCluster));
-    return nextCluster;
+uint16_t encodeFATTime(const tm& t) {
+    return ((t.tm_hour & 0x1F) << 11) |
+           ((t.tm_min & 0x3F) << 5)  |
+           ((t.tm_sec / 2) & 0x1F);
+}
+
+uint16_t encodeFATDate(const tm& t) {
+    return (((t.tm_year - 80) & 0x7F) << 9) |
+           ((t.tm_mon + 1) << 5) |
+           (t.tm_mday & 0x1F);
 }

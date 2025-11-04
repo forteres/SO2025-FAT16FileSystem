@@ -34,4 +34,4 @@ Cada uma das operações será avaliada de acordo com a sua corretude: As opera�
 * Exibir os atributos de um arquivo	10% (X)
 * Renomear um arquivo		10%         (X)
 * Apagar/remover um arquivo		20%     (X)
-* Inserir/criar um novo arquivo	40%     ()	 
+* Inserir/criar um novo arquivo	40%     (X)	 
